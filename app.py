@@ -14,7 +14,7 @@ st_autorefresh(interval=5 * 1000, key="refresh")
 
 st.set_page_config(layout="wide")
 
-client = Client()
+client = Client("", "")
 
 ASSETS = {
     "BTC": "BTCUSDT",
