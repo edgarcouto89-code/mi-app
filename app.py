@@ -7,8 +7,8 @@ from ta.trend import EMAIndicator
 from ta.momentum import RSIIndicator
 from streamlit_autorefresh import st_autorefresh
 
-# ⚡ refresh más sano (10s en vez de 5s)
-st_autorefresh(interval=10*1000, key="refresh")
+# ⚡ refresh seguro (NO tan agresivo)
+st_autorefresh(interval=15*1000, key="refresh")
 
 st.set_page_config(layout="wide")
 
@@ -24,7 +24,7 @@ TIMEFRAMES = {
     "4H": "4h"
 }
 
-# ---------------- DATA OPTIMIZADA ---------------- #
+# ---------------- DATA ---------------- #
 
 @st.cache_data(ttl=30)
 def get_klines(symbol, interval="15m", limit=150):
@@ -34,7 +34,8 @@ def get_klines(symbol, interval="15m", limit=150):
     try:
         data = requests.get(url, timeout=5).json()
 
-        if not data or isinstance(data, dict):
+        # 🔥 FIX IMPORTANTE
+        if not isinstance(data, list) or len(data) == 0:
             return pd.DataFrame()
 
         df = pd.DataFrame(data, columns=[
@@ -49,7 +50,7 @@ def get_klines(symbol, interval="15m", limit=150):
 
         df.set_index("time", inplace=True)
 
-        # indicadores (liviano)
+        # indicadores
         df["EMA50"] = EMAIndicator(df["close"], 50).ema_indicator()
         df["EMA200"] = EMAIndicator(df["close"], 200).ema_indicator()
         df["RSI"] = RSIIndicator(df["close"], 14).rsi()
@@ -63,7 +64,7 @@ def get_klines(symbol, interval="15m", limit=150):
         return pd.DataFrame()
 
 
-# ---------------- PRECIO LIVE ---------------- #
+# ---------------- PRICE LIVE ---------------- #
 
 def get_price(symbol):
     try:
@@ -73,7 +74,7 @@ def get_price(symbol):
         return None
 
 
-# ---------------- DECISIÓN SIMPLE ---------------- #
+# ---------------- DECISION ---------------- #
 
 def decision(row):
     if row["EMA50"] > row["EMA200"] and row["RSI"] < 65:
@@ -83,7 +84,7 @@ def decision(row):
     return "HOLD"
 
 
-# ---------------- GRÁFICO LIMPIO ---------------- #
+# ---------------- CHART ---------------- #
 
 def plot(df):
 
@@ -112,7 +113,7 @@ def plot(df):
     fig.add_trace(go.Scatter(x=df.index, y=df["EMA50"], name="EMA50", line=dict(color="cyan")), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df["EMA200"], name="EMA200", line=dict(color="yellow")), row=1, col=1)
 
-    # soporte/resistencia
+    # soporte / resistencia
     fig.add_trace(go.Scatter(x=df.index, y=df["Support"], name="Soporte", line=dict(color="blue", dash="dot")), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df["Resistance"], name="Resistencia", line=dict(color="orange", dash="dot")), row=1, col=1)
 
@@ -121,7 +122,7 @@ def plot(df):
     fig.add_hline(y=70, line_color="red", row=2, col=1)
     fig.add_hline(y=30, line_color="green", row=2, col=1)
 
-    # estilo PRO
+    # 🔥 ESTILO PRO
     fig.update_layout(
         height=800,
         plot_bgcolor="black",
@@ -134,11 +135,10 @@ def plot(df):
     return fig
 
 
-# ---------------- UI MÁS RÁPIDA ---------------- #
+# ---------------- UI ---------------- #
 
-st.title("⚡ Trading PRO ULTRA RÁPIDO")
+st.title("⚡ TRADING PRO ESTABLE")
 
-# 🔥 SOLO 1 activo (clave del rendimiento)
 asset = st.selectbox("📊 Crypto", list(ASSETS.keys()))
 tf = st.selectbox("⏱ Timeframe", list(TIMEFRAMES.keys()))
 
@@ -146,11 +146,12 @@ symbol = ASSETS[asset]
 
 df = get_klines(symbol, TIMEFRAMES[tf])
 
-# 🚨 FIX CRÍTICO
-if df.empty:
-    st.warning("⏳ Cargando datos...")
+# 🚨 FIX PRINCIPAL (TU ERROR)
+if df is None or df.empty or len(df) < 50:
+    st.warning("⏳ Cargando datos... esperando velas suficientes")
     st.stop()
 
+# 🔥 AHORA SÍ ES SEGURO
 last = df.iloc[-1]
 price = get_price(symbol)
 sig = decision(last)
@@ -163,7 +164,7 @@ col2.metric("🔺 Máx", round(last["high"], 2))
 col3.metric("🔻 Mín", round(last["low"], 2))
 col4.metric("📊 RSI", round(last["RSI"], 2))
 
-# señal simple
+# señal
 if sig == "BUY":
     st.success("🟢 COMPRA")
 elif sig == "SELL":
