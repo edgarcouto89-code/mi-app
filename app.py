@@ -7,8 +7,8 @@ from ta.trend import EMAIndicator
 from ta.momentum import RSIIndicator
 from streamlit_autorefresh import st_autorefresh
 
-# ⚡ refresh seguro (NO tan agresivo)
-st_autorefresh(interval=15*1000, key="refresh")
+# 🔄 AUTO REFRESH (5 segundos)
+st_autorefresh(interval=5 * 1000, key="refresh")
 
 st.set_page_config(layout="wide")
 
@@ -26,16 +26,14 @@ TIMEFRAMES = {
 
 # ---------------- DATA ---------------- #
 
-@st.cache_data(ttl=30)
-def get_klines(symbol, interval="15m", limit=150):
-
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+@st.cache_data(ttl=10)
+def get_data(symbol, interval="15m", limit=200):
 
     try:
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
         data = requests.get(url, timeout=5).json()
 
-        # 🔥 FIX IMPORTANTE
-        if not isinstance(data, list) or len(data) == 0:
+        if not isinstance(data, list) or len(data) < 60:
             return pd.DataFrame()
 
         df = pd.DataFrame(data, columns=[
@@ -44,11 +42,10 @@ def get_klines(symbol, interval="15m", limit=150):
         ])
 
         df["time"] = pd.to_datetime(df["time"], unit="ms")
-
-        for c in ["open","high","low","close","volume"]:
-            df[c] = df[c].astype(float)
-
         df.set_index("time", inplace=True)
+
+        for col in ["open","high","low","close","volume"]:
+            df[col] = df[col].astype(float)
 
         # indicadores
         df["EMA50"] = EMAIndicator(df["close"], 50).ema_indicator()
@@ -64,17 +61,7 @@ def get_klines(symbol, interval="15m", limit=150):
         return pd.DataFrame()
 
 
-# ---------------- PRICE LIVE ---------------- #
-
-def get_price(symbol):
-    try:
-        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
-        return float(requests.get(url, timeout=3).json()["price"])
-    except:
-        return None
-
-
-# ---------------- DECISION ---------------- #
+# ---------------- DECISIÓN ---------------- #
 
 def decision(row):
     if row["EMA50"] > row["EMA200"] and row["RSI"] < 65:
@@ -84,11 +71,11 @@ def decision(row):
     return "HOLD"
 
 
-# ---------------- CHART ---------------- #
+# ---------------- GRÁFICO ---------------- #
 
 def plot(df):
 
-    df = df.tail(60)
+    df = df.tail(80)
 
     fig = make_subplots(
         rows=2, cols=1,
@@ -97,39 +84,60 @@ def plot(df):
         vertical_spacing=0.05
     )
 
-    # velas
+    # 🕯 VELAS
     fig.add_trace(go.Candlestick(
         x=df.index,
         open=df["open"],
         high=df["high"],
         low=df["low"],
         close=df["close"],
-        name="Precio",
-        increasing_line_color="lime",
-        decreasing_line_color="red"
+        name="Precio"
     ), row=1, col=1)
 
-    # EMAs
-    fig.add_trace(go.Scatter(x=df.index, y=df["EMA50"], name="EMA50", line=dict(color="cyan")), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["EMA200"], name="EMA200", line=dict(color="yellow")), row=1, col=1)
+    # 📈 EMAs
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["EMA50"],
+        name="EMA 50",
+        line=dict(color="cyan", width=2)
+    ), row=1, col=1)
 
-    # soporte / resistencia
-    fig.add_trace(go.Scatter(x=df.index, y=df["Support"], name="Soporte", line=dict(color="blue", dash="dot")), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df["Resistance"], name="Resistencia", line=dict(color="orange", dash="dot")), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["EMA200"],
+        name="EMA 200",
+        line=dict(color="yellow", width=2)
+    ), row=1, col=1)
 
-    # RSI
-    fig.add_trace(go.Scatter(x=df.index, y=df["RSI"], name="RSI", line=dict(color="white")), row=2, col=1)
+    # 📊 soporte / resistencia
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["Support"],
+        name="Soporte",
+        line=dict(color="blue", dash="dot")
+    ), row=1, col=1)
+
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["Resistance"],
+        name="Resistencia",
+        line=dict(color="orange", dash="dot")
+    ), row=1, col=1)
+
+    # 📊 RSI
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df["RSI"],
+        name="RSI",
+        line=dict(color="white")
+    ), row=2, col=1)
+
     fig.add_hline(y=70, line_color="red", row=2, col=1)
     fig.add_hline(y=30, line_color="green", row=2, col=1)
 
-    # 🔥 ESTILO PRO
+    # 🎨 estilo negro pro
     fig.update_layout(
-        height=800,
+        height=900,
         plot_bgcolor="black",
         paper_bgcolor="black",
         font=dict(color="white", size=13),
-        xaxis_rangeslider_visible=False,
-        legend=dict(font=dict(color="white"))
+        legend=dict(font=dict(color="white")),
+        xaxis_rangeslider_visible=False
     )
 
     return fig
@@ -137,34 +145,41 @@ def plot(df):
 
 # ---------------- UI ---------------- #
 
-st.title("⚡ TRADING PRO ESTABLE")
+st.title("🚀 TRADING PRO (ESTABLE + SIN ERRORES)")
 
 asset = st.selectbox("📊 Crypto", list(ASSETS.keys()))
 tf = st.selectbox("⏱ Timeframe", list(TIMEFRAMES.keys()))
 
 symbol = ASSETS[asset]
 
-df = get_klines(symbol, TIMEFRAMES[tf])
+# 🔥 DATA
+df = get_data(symbol, TIMEFRAMES[tf])
 
-# 🚨 FIX PRINCIPAL (TU ERROR)
-if df is None or df.empty or len(df) < 50:
-    st.warning("⏳ Cargando datos... esperando velas suficientes")
+# 🚨 FIX DEFINITIVO (ESTO EVITA TU ERROR)
+if df is None or df.empty:
+    st.warning("⏳ Esperando datos de Binance...")
     st.stop()
 
-# 🔥 AHORA SÍ ES SEGURO
+if len(df) < 60:
+    st.warning(f"⏳ Muy pocos datos: {len(df)} velas")
+    st.stop()
+
+# ✅ AHORA ES SEGURO
 last = df.iloc[-1]
-price = get_price(symbol)
+
 sig = decision(last)
 
-# métricas
+# ---------------- MÉTRICAS ---------------- #
+
 col1, col2, col3, col4 = st.columns(4)
 
-col1.metric("💰 Precio", round(price if price else last["close"], 2))
+col1.metric("💰 Precio", round(last["close"], 2))
 col2.metric("🔺 Máx", round(last["high"], 2))
 col3.metric("🔻 Mín", round(last["low"], 2))
 col4.metric("📊 RSI", round(last["RSI"], 2))
 
-# señal
+# ---------------- SEÑAL ---------------- #
+
 if sig == "BUY":
     st.success("🟢 COMPRA")
 elif sig == "SELL":
@@ -172,5 +187,6 @@ elif sig == "SELL":
 else:
     st.info("⚪ ESPERAR")
 
-# gráfico
+# ---------------- GRÁFICO ---------------- #
+
 st.plotly_chart(plot(df), use_container_width=True)
