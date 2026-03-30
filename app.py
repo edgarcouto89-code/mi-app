@@ -8,7 +8,7 @@ from ta.momentum import RSIIndicator
 from streamlit_autorefresh import st_autorefresh
 
 # 🔄 refresh estable (NO agresivo)
-st_autorefresh(interval=15 * 1000, key="refresh")
+st_autorefresh(interval=20 * 1000, key="refresh")
 
 st.set_page_config(layout="wide")
 
@@ -24,16 +24,23 @@ TIMEFRAMES = {
     "4H": "4h"
 }
 
-# ---------------- DATA (ROBUSTO) ---------------- #
+# ---------------- DATA ROBUSTA ---------------- #
 
-@st.cache_data(ttl=20)
+@st.cache_data(ttl=10)
 def get_data(symbol, interval="15m", limit=200):
 
-    try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-        data = requests.get(url, timeout=5).json()
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
 
-        # 🚨 FIX CLAVE: Binance a veces devuelve pocos datos
+    try:
+        r = requests.get(url, timeout=8)
+
+        # 🚨 FIX 1: status code
+        if r.status_code != 200:
+            return pd.DataFrame()
+
+        data = r.json()
+
+        # 🚨 FIX 2: formato válido
         if not isinstance(data, list) or len(data) < 30:
             return pd.DataFrame()
 
@@ -48,11 +55,16 @@ def get_data(symbol, interval="15m", limit=200):
         for col in ["open","high","low","close","volume"]:
             df[col] = df[col].astype(float)
 
-        # indicadores (solo si hay suficiente data)
+        # indicadores SOLO si hay suficiente data
         if len(df) >= 50:
             df["EMA50"] = EMAIndicator(df["close"], 50).ema_indicator()
+        else:
+            df["EMA50"] = df["close"]
+
         if len(df) >= 200:
             df["EMA200"] = EMAIndicator(df["close"], 200).ema_indicator()
+        else:
+            df["EMA200"] = df["close"]
 
         if len(df) >= 14:
             df["RSI"] = RSIIndicator(df["close"], 14).rsi()
@@ -62,7 +74,7 @@ def get_data(symbol, interval="15m", limit=200):
         df["Support"] = df["low"].rolling(20).min()
         df["Resistance"] = df["high"].rolling(20).max()
 
-        return df.dropna()
+        return df
 
     except:
         return pd.DataFrame()
@@ -85,7 +97,7 @@ def decision(row):
 
 def plot(df):
 
-    df_plot = df.tail(50)  # 👈 VISUAL MÁS LIMPIO
+    df_plot = df.tail(50)
 
     fig = make_subplots(
         rows=2, cols=1,
@@ -104,19 +116,38 @@ def plot(df):
         name="Precio"
     ), row=1, col=1)
 
-    # 📈 EMAs (solo si existen)
-    if "EMA50" in df_plot:
-        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot["EMA50"], name="EMA 50", line=dict(color="cyan")), row=1, col=1)
+    # 📈 EMAs
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot["EMA50"],
+        name="EMA 50",
+        line=dict(color="cyan")
+    ), row=1, col=1)
 
-    if "EMA200" in df_plot:
-        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot["EMA200"], name="EMA 200", line=dict(color="yellow")), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot["EMA200"],
+        name="EMA 200",
+        line=dict(color="yellow")
+    ), row=1, col=1)
 
     # 📊 soporte / resistencia
-    fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot["Support"], name="Soporte", line=dict(color="blue", dash="dot")), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot["Resistance"], name="Resistencia", line=dict(color="orange", dash="dot")), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot["Support"],
+        name="Soporte",
+        line=dict(color="blue", dash="dot")
+    ), row=1, col=1)
+
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot["Resistance"],
+        name="Resistencia",
+        line=dict(color="orange", dash="dot")
+    ), row=1, col=1)
 
     # 📊 RSI
-    fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot["RSI"], name="RSI", line=dict(color="white")), row=2, col=1)
+    fig.add_trace(go.Scatter(
+        x=df_plot.index, y=df_plot["RSI"],
+        name="RSI",
+        line=dict(color="white")
+    ), row=2, col=1)
 
     fig.add_hline(y=70, line_color="red", row=2, col=1)
     fig.add_hline(y=30, line_color="green", row=2, col=1)
@@ -136,7 +167,7 @@ def plot(df):
 
 # ---------------- UI ---------------- #
 
-st.title("🚀 TRADING PRO ESTABLE (ANTI ERROR)")
+st.title("🚀 TRADING PRO ULTRA ESTABLE")
 
 asset = st.selectbox("📊 Crypto", list(ASSETS.keys()))
 tf = st.selectbox("⏱ Timeframe", list(TIMEFRAMES.keys()))
@@ -145,7 +176,7 @@ symbol = ASSETS[asset]
 
 df = get_data(symbol, TIMEFRAMES[tf])
 
-# 🚨 FIX FINAL (ESTO EVITA TU ERROR)
+# 🚨 FIX FINAL (ANTI CRASH)
 if df is None or df.empty:
     st.warning("⏳ Binance no devolvió datos, reintentando...")
     st.stop()
@@ -168,7 +199,7 @@ col2.metric("🔺 Máx", round(last["high"], 2))
 col3.metric("🔻 Mín", round(last["low"], 2))
 col4.metric("📊 RSI", round(last["RSI"], 2))
 
-# ---------------- SEÑAL ---------------- #
+# ---------------- SEÑALES ---------------- #
 
 if sig == "BUY":
     st.success("🟢 COMPRA")
