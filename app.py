@@ -1,14 +1,15 @@
 import streamlit as st
 import pandas as pd
 import requests
+import time
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from ta.trend import EMAIndicator
 from ta.momentum import RSIIndicator
 from streamlit_autorefresh import st_autorefresh
 
-# 🔄 refresh estable (NO agresivo)
-st_autorefresh(interval=20 * 1000, key="refresh")
+# 🔄 refresh seguro (NO agresivo)
+st_autorefresh(interval=15 * 1000, key="refresh")
 
 st.set_page_config(layout="wide")
 
@@ -24,60 +25,69 @@ TIMEFRAMES = {
     "4H": "4h"
 }
 
-# ---------------- DATA ROBUSTA ---------------- #
+# ---------------- BINANCE ROBUSTO ---------------- #
+
+def fetch_binance(symbol, interval, limit=200):
+
+    url = "https://api.binance.com/api/v3/klines"
+
+    for attempt in range(3):  # 🔥 retry automático
+        try:
+            r = requests.get(
+                url,
+                params={
+                    "symbol": symbol,
+                    "interval": interval,
+                    "limit": limit
+                },
+                timeout=8
+            )
+
+            if r.status_code != 200:
+                time.sleep(1)
+                continue
+
+            data = r.json()
+
+            if isinstance(data, list) and len(data) >= 30:
+                return data
+
+        except:
+            time.sleep(1)
+
+    return []
+
+
+# ---------------- DATA ---------------- #
 
 @st.cache_data(ttl=10)
-def get_data(symbol, interval="15m", limit=200):
+def get_data(symbol, interval):
 
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    data = fetch_binance(symbol, interval)
 
-    try:
-        r = requests.get(url, timeout=8)
-
-        # 🚨 FIX 1: status code
-        if r.status_code != 200:
-            return pd.DataFrame()
-
-        data = r.json()
-
-        # 🚨 FIX 2: formato válido
-        if not isinstance(data, list) or len(data) < 30:
-            return pd.DataFrame()
-
-        df = pd.DataFrame(data, columns=[
-            "time","open","high","low","close","volume",
-            "close_time","qav","trades","taker_base","taker_quote","ignore"
-        ])
-
-        df["time"] = pd.to_datetime(df["time"], unit="ms")
-        df.set_index("time", inplace=True)
-
-        for col in ["open","high","low","close","volume"]:
-            df[col] = df[col].astype(float)
-
-        # indicadores SOLO si hay suficiente data
-        if len(df) >= 50:
-            df["EMA50"] = EMAIndicator(df["close"], 50).ema_indicator()
-        else:
-            df["EMA50"] = df["close"]
-
-        if len(df) >= 200:
-            df["EMA200"] = EMAIndicator(df["close"], 200).ema_indicator()
-        else:
-            df["EMA200"] = df["close"]
-
-        if len(df) >= 14:
-            df["RSI"] = RSIIndicator(df["close"], 14).rsi()
-        else:
-            df["RSI"] = 50
-
-        df["Support"] = df["low"].rolling(20).min()
-        df["Resistance"] = df["high"].rolling(20).max()
-
-        return df
-
-    except:
+    if not data:
         return pd.DataFrame()
+
+    df = pd.DataFrame(data, columns=[
+        "time","open","high","low","close","volume",
+        "close_time","qav","trades","taker_base","taker_quote","ignore"
+    ])
+
+    df["time"] = pd.to_datetime(df["time"], unit="ms")
+    df.set_index("time", inplace=True)
+
+    for col in ["open","high","low","close","volume"]:
+        df[col] = df[col].astype(float)
+
+    # indicadores seguros
+    df["EMA50"] = EMAIndicator(df["close"], 50).ema_indicator()
+    df["EMA200"] = EMAIndicator(df["close"], 200).ema_indicator()
+    df["RSI"] = RSIIndicator(df["close"], 14).rsi()
+
+    df["Support"] = df["low"].rolling(20).min()
+    df["Resistance"] = df["high"].rolling(20).max()
+
+    return df.dropna()
 
 
 # ---------------- DECISIÓN ---------------- #
@@ -102,11 +112,9 @@ def plot(df):
     fig = make_subplots(
         rows=2, cols=1,
         shared_xaxes=True,
-        row_heights=[0.7, 0.3],
-        vertical_spacing=0.05
+        row_heights=[0.7, 0.3]
     )
 
-    # 🕯 velas
     fig.add_trace(go.Candlestick(
         x=df_plot.index,
         open=df_plot["open"],
@@ -116,7 +124,6 @@ def plot(df):
         name="Precio"
     ), row=1, col=1)
 
-    # 📈 EMAs
     fig.add_trace(go.Scatter(
         x=df_plot.index, y=df_plot["EMA50"],
         name="EMA 50",
@@ -129,7 +136,6 @@ def plot(df):
         line=dict(color="yellow")
     ), row=1, col=1)
 
-    # 📊 soporte / resistencia
     fig.add_trace(go.Scatter(
         x=df_plot.index, y=df_plot["Support"],
         name="Soporte",
@@ -142,7 +148,6 @@ def plot(df):
         line=dict(color="orange", dash="dot")
     ), row=1, col=1)
 
-    # 📊 RSI
     fig.add_trace(go.Scatter(
         x=df_plot.index, y=df_plot["RSI"],
         name="RSI",
@@ -152,13 +157,11 @@ def plot(df):
     fig.add_hline(y=70, line_color="red", row=2, col=1)
     fig.add_hline(y=30, line_color="green", row=2, col=1)
 
-    # 🎨 estilo pro
     fig.update_layout(
         height=850,
         plot_bgcolor="black",
         paper_bgcolor="black",
-        font=dict(color="white", size=13),
-        legend=dict(font=dict(color="white")),
+        font=dict(color="white"),
         xaxis_rangeslider_visible=False
     )
 
@@ -167,7 +170,7 @@ def plot(df):
 
 # ---------------- UI ---------------- #
 
-st.title("🚀 TRADING PRO ULTRA ESTABLE")
+st.title("🚀 TRADING PRO ULTRA ESTABLE (BINANCE FIXED)")
 
 asset = st.selectbox("📊 Crypto", list(ASSETS.keys()))
 tf = st.selectbox("⏱ Timeframe", list(TIMEFRAMES.keys()))
@@ -176,18 +179,16 @@ symbol = ASSETS[asset]
 
 df = get_data(symbol, TIMEFRAMES[tf])
 
-# 🚨 FIX FINAL (ANTI CRASH)
+# 🚨 FIX FINAL
 if df is None or df.empty:
-    st.warning("⏳ Binance no devolvió datos, reintentando...")
+    st.warning("⏳ Binance no respondió, reintentando automáticamente...")
     st.stop()
 
 if len(df) < 30:
-    st.warning(f"⏳ Esperando datos... ({len(df)} velas recibidas)")
+    st.warning(f"⏳ Esperando más datos... ({len(df)} velas)")
     st.stop()
 
-# ✅ SEGURO
 last = df.iloc[-1]
-
 sig = decision(last)
 
 # ---------------- MÉTRICAS ---------------- #
@@ -199,7 +200,7 @@ col2.metric("🔺 Máx", round(last["high"], 2))
 col3.metric("🔻 Mín", round(last["low"], 2))
 col4.metric("📊 RSI", round(last["RSI"], 2))
 
-# ---------------- SEÑALES ---------------- #
+# ---------------- SEÑAL ---------------- #
 
 if sig == "BUY":
     st.success("🟢 COMPRA")
